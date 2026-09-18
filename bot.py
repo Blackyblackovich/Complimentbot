@@ -12,14 +12,14 @@ def call(method, **kw):
         print('err', method, e)
         return None
 
-# 1) Читаем список подписавшихся
+# 1) кто подписан
 users_file = 'users.json'
 try:
     users = json.load(open(users_file))
-except:
+except Exception:
     users = []
 
-# 2) Узнаём, кто за это время нажал START
+# 2) новые /start
 res = call('getUpdates', timeout=30)
 new_users = 0
 if res and res.get('ok'):
@@ -32,9 +32,9 @@ if res and res.get('ok'):
                 users.append({'id': chat_id, 'name': name, 'added': str(datetime.date.today())})
                 new_users += 1
                 call('sendMessage', chat_id=chat_id,
-                     text=f'Привет, {name}! 💖 Я твой персональный бот-комплиментатор. Каждый день буду присылать тебе тёплые слова.')
+                     text=f'Привет, {name}! 💖 Я твой персональный бот-комплиментатор. Буду присылать тёплые слова четыре раза в день — и всегда разные.')
 
-# 3) Сохраняем обновлённый список (коммитим в репозиторий)
+# 3) сохраняем список
 if new_users > 0:
     with open(users_file, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
@@ -44,19 +44,27 @@ if new_users > 0:
     subprocess.run(['git', 'commit', '-m', 'update users'], check=False)
     subprocess.run(['git', 'push'], check=False)
 
-# 4) Отправляем комплимент всем подписавшимся
+# 4) отправляем
 if not users:
     print('Пока никто не подписался')
-    exit(0)
+    raise SystemExit
 
 lines = [l.strip() for l in open('compliments.txt', encoding='utf-8') if l.strip()]
-epoch = (datetime.date.today() - datetime.date(1970, 1, 1)).days
+n = len(lines)
+
+now = datetime.datetime.now(datetime.timezone.utc)
+epoch = (now.date() - datetime.date(1970, 1, 1)).days
+event = os.environ.get('GITHUB_EVENT_NAME', 'schedule')
+SLOT_HOURS_UTC = [9, 13, 18, 24]   # наши четыре будильника по UTC
+slot = next((i for i, h in enumerate(SLOT_HOURS_UTC) if now.hour < h), 3)
+
 emoji = random.choice(['💖', '💌', '🌸', '☀️', '🪽', '🌙'])
 
 for u in users:
-    idx = (epoch * 4 + hash(u['id'])) % len(lines)
-    call('sendMessage',
-         chat_id=u['id'],
+    if event == 'workflow_dispatch':
+        idx = random.randrange(n)        # ручной запуск — случайный комплимент
+    else:
+        idx = (epoch * 4 + slot) % n     # плановый — у каждого будильника свой
+    call('sendMessage', chat_id=u['id'],
          text=f'{emoji} {lines[idx]}\n\nЦелую. Твой любимый 💫')
-
-print(f'Отправлено {len(users)} пользователям, новых +{new_users}')
+    print('sent', u['id'], 'idx', idx, 'slot', slot, 'event', event)
